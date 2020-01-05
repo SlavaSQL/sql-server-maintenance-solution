@@ -10,7 +10,7 @@ License: https://ola.hallengren.com/license.html
 
 GitHub: https://github.com/olahallengren/sql-server-maintenance-solution
 
-Version: 2020-01-05 21:58:18
+Version: 2020-01-06 00:04:47
 
 You can contact me by e-mail at ola@hallengren.com.
 
@@ -127,7 +127,7 @@ BEGIN
   --// Source:  https://ola.hallengren.com                                                        //--
   --// License: https://ola.hallengren.com/license.html                                           //--
   --// GitHub:  https://github.com/olahallengren/sql-server-maintenance-solution                  //--
-  --// Version: 2020-01-05 21:58:18                                                               //--
+  --// Version: 2020-01-06 00:04:47                                                               //--
   ----------------------------------------------------------------------------------------------------
 
   SET NOCOUNT ON
@@ -378,12 +378,9 @@ ALTER PROCEDURE [dbo].[DatabaseBackup]
 @BlockSize int = NULL,
 @BufferCount int = NULL,
 @MaxTransferSize int = NULL,
-
 @NumberOfFiles int = NULL,
 @MinDatabaseSizeForMultipleFiles int = NULL,
-
 @MaxFileSize int = NULL,
-
 @CompressionLevel int = NULL,
 @Description nvarchar(max) = NULL,
 @Threads int = NULL,
@@ -435,7 +432,7 @@ BEGIN
   --// Source:  https://ola.hallengren.com                                                        //--
   --// License: https://ola.hallengren.com/license.html                                           //--
   --// GitHub:  https://github.com/olahallengren/sql-server-maintenance-solution                  //--
-  --// Version: 2020-01-05 21:58:18                                                               //--
+  --// Version: 2020-01-06 00:04:47                                                               //--
   ----------------------------------------------------------------------------------------------------
 
   SET NOCOUNT ON
@@ -647,12 +644,9 @@ BEGIN
   SET @Parameters += ', @BlockSize = ' + ISNULL(CAST(@BlockSize AS nvarchar),'NULL')
   SET @Parameters += ', @BufferCount = ' + ISNULL(CAST(@BufferCount AS nvarchar),'NULL')
   SET @Parameters += ', @MaxTransferSize = ' + ISNULL(CAST(@MaxTransferSize AS nvarchar),'NULL')
-
   SET @Parameters += ', @NumberOfFiles = ' + ISNULL(CAST(@NumberOfFiles AS nvarchar),'NULL')
   SET @Parameters += ', @MinDatabaseSizeForMultipleFiles = ' + ISNULL(CAST(@MinDatabaseSizeForMultipleFiles AS nvarchar),'NULL')
-
   SET @Parameters += ', @MaxFileSize = ' + ISNULL(CAST(@MaxFileSize AS nvarchar),'NULL')
-
   SET @Parameters += ', @CompressionLevel = ' + ISNULL(CAST(@CompressionLevel AS nvarchar),'NULL')
   SET @Parameters += ', @Description = ' + ISNULL('''' + REPLACE(@Description,'''','''''') + '''','NULL')
   SET @Parameters += ', @Threads = ' + ISNULL(CAST(@Threads AS nvarchar),'NULL')
@@ -1506,7 +1500,7 @@ BEGIN
     SELECT 'The value for the parameter @MaxTransferSize is not supported.'
   END
 
-  IF @NumberOfFiles < 1 OR @NumberOfFiles > 64 OR (@NumberOfFiles > 32 AND @BackupSoftware = 'SQLBACKUP') OR @NumberOfFiles < (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @Directories WHERE Mirror = 0) > 0 OR (@URL IS NOT NULL AND @Credential IS NOT NULL AND @NumberOfFiles <> 1)  OR (@NumberOfFiles > 1 AND @BackupSoftware IN('SQLBACKUP','SQLSAFE') AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 1)) OR (@NumberOfFiles > 32 AND @BackupSoftware = 'DATA_DOMAIN_BOOST') OR @NumberOfFiles < (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @URLs WHERE Mirror = 0) > 0
+  IF @NumberOfFiles < 1 OR @NumberOfFiles > 64 OR (@NumberOfFiles > 32 AND @BackupSoftware = 'SQLBACKUP') OR @NumberOfFiles < (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @Directories WHERE Mirror = 0) > 0 OR (@URL IS NOT NULL AND @Credential IS NOT NULL AND @NumberOfFiles <> 1) OR (@NumberOfFiles > 1 AND @BackupSoftware IN('SQLBACKUP','SQLSAFE') AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 1)) OR (@NumberOfFiles > 32 AND @BackupSoftware = 'DATA_DOMAIN_BOOST') OR @NumberOfFiles < (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @URLs WHERE Mirror = 0) > 0
   BEGIN
     INSERT INTO @Errors ([Message])
     SELECT 'The value for the parameter @NumberOfFiles is not supported.'
@@ -1524,6 +1518,12 @@ BEGIN
     SELECT 'The value for the parameter @MinDatabaseSizeForMultipleFiles is not supported. This parameter can only be used together with @NumberOfFiles.'
   END
 
+  IF @MinDatabaseSizeForMultipleFiles IS NOT NULL AND @BackupType <> 'FULL'
+  BEGIN
+    INSERT INTO @Errors ([Message])
+    SELECT 'The value for the parameter @MinDatabaseSizeForMultipleFiles is not supported. This parameter can only be used with full backups.'
+  END
+
   IF @MaxFileSize <= 0
   BEGIN
     INSERT INTO @Errors ([Message])
@@ -1534,6 +1534,12 @@ BEGIN
   BEGIN
     INSERT INTO @Errors ([Message])
     SELECT 'The parameters @MaxFileSize and @NumberOfFiles cannot be used together.'
+  END
+
+   IF @MaxFileSize IS NOT NULL AND @BackupType <> 'FULL'
+  BEGIN
+    INSERT INTO @Errors ([Message])
+    SELECT 'The value for the parameter @MaxFileSize is not supported. This parameter can only be used with full backups.'
   END
 
   IF (@BackupSoftware IS NULL AND @CompressionLevel IS NOT NULL) OR (@BackupSoftware = 'LITESPEED' AND (@CompressionLevel < 0 OR @CompressionLevel > 8)) OR (@BackupSoftware = 'SQLBACKUP' AND (@CompressionLevel < 0 OR @CompressionLevel > 4)) OR (@BackupSoftware = 'SQLSAFE' AND (@CompressionLevel < 1 OR @CompressionLevel > 4)) OR (@CompressionLevel IS NOT NULL AND @BackupSoftware = 'DATA_DOMAIN_BOOST')
@@ -2244,11 +2250,9 @@ BEGIN
                                         WHEN @NumberOfFiles > 1 AND (@CurrentDatabaseSize >= (@MinDatabaseSizeForMultipleFiles * 1024 / 8) OR @MinDatabaseSizeForMultipleFiles IS NULL) THEN @NumberOfFiles
                                         WHEN @NumberOfFiles > 1 AND (@CurrentDatabaseSize < (@MinDatabaseSizeForMultipleFiles * 1024 / 8)) AND EXISTS (SELECT * FROM @Directories WHERE Mirror = 0) THEN (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)
                                         WHEN @NumberOfFiles > 1 AND (@CurrentDatabaseSize < (@MinDatabaseSizeForMultipleFiles * 1024 / 8)) AND EXISTS (SELECT * FROM @URLs WHERE Mirror = 0) THEN (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)
-                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NOT NULL AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 0) THEN ((@CurrentDatabaseSize / (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)) / (@MaxFileSize * 1024 / 8) + CASE WHEN (@CurrentDatabaseSize / (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)) % (@MaxFileSize * 1024 / 8) = 0 THEN 0 ELSE 1 END) * (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)
-                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NOT NULL AND EXISTS(SELECT * FROM @URLs WHERE Mirror = 0) THEN ((@CurrentDatabaseSize / (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)) / (@MaxFileSize * 1024 / 8) + CASE WHEN (@CurrentDatabaseSize / (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)) % (@MaxFileSize * 1024 / 8) = 0 THEN 0 ELSE 1 END) * (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)
+                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NOT NULL AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 0) THEN (SELECT MIN(NumberOfFilesInEachDirectory) FROM (SELECT ((@CurrentDatabaseSize / (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)) / (@MaxFileSize * 1024 / 8) + CASE WHEN (@CurrentDatabaseSize / (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)) % (@MaxFileSize * 1024 / 8) = 0 THEN 0 ELSE 1 END) AS NumberOfFilesInEachDirectory UNION SELECT CASE WHEN @BackupSoftware IN('SQLBACKUP','DATA_DOMAIN_BOOST') THEN 32 ELSE 64 END / (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)) NumberOfFilesInEachDirectory) * (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)
+                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NOT NULL AND EXISTS(SELECT * FROM @URLs WHERE Mirror = 0) THEN (SELECT MIN(NumberOfFilesInEachDirectory) FROM (SELECT ((@CurrentDatabaseSize / (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)) / (@MaxFileSize * 1024 / 8) + CASE WHEN (@CurrentDatabaseSize / (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)) % (@MaxFileSize * 1024 / 8) = 0 THEN 0 ELSE 1 END) AS NumberOfFilesInEachDirectory UNION SELECT 64 / (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)) NumberOfFilesInEachDirectory) * (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)
                                         END
-
-
 
     SELECT @CurrentDatabaseMirroringRole = UPPER(mirroring_role_desc)
     FROM sys.database_mirroring
@@ -3620,7 +3624,7 @@ BEGIN
   --// Source:  https://ola.hallengren.com                                                        //--
   --// License: https://ola.hallengren.com/license.html                                           //--
   --// GitHub:  https://github.com/olahallengren/sql-server-maintenance-solution                  //--
-  --// Version: 2020-01-05 21:58:18                                                               //--
+  --// Version: 2020-01-06 00:04:47                                                               //--
   ----------------------------------------------------------------------------------------------------
 
   SET NOCOUNT ON
@@ -5357,7 +5361,7 @@ BEGIN
   --// Source:  https://ola.hallengren.com                                                        //--
   --// License: https://ola.hallengren.com/license.html                                           //--
   --// GitHub:  https://github.com/olahallengren/sql-server-maintenance-solution                  //--
-  --// Version: 2020-01-05 21:58:18                                                               //--
+  --// Version: 2020-01-06 00:04:47                                                               //--
   ----------------------------------------------------------------------------------------------------
 
   SET NOCOUNT ON
