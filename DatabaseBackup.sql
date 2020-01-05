@@ -23,7 +23,12 @@ ALTER PROCEDURE [dbo].[DatabaseBackup]
 @BlockSize int = NULL,
 @BufferCount int = NULL,
 @MaxTransferSize int = NULL,
+
 @NumberOfFiles int = NULL,
+@MinDatabaseSizeForMultipleFiles int = NULL,
+
+@MaxFileSize int = NULL,
+
 @CompressionLevel int = NULL,
 @Description nvarchar(max) = NULL,
 @Threads int = NULL,
@@ -75,7 +80,7 @@ BEGIN
   --// Source:  https://ola.hallengren.com                                                        //--
   --// License: https://ola.hallengren.com/license.html                                           //--
   --// GitHub:  https://github.com/olahallengren/sql-server-maintenance-solution                  //--
-  --// Version: 2020-01-05 15:00:38                                                               //--
+  --// Version: 2020-01-05 21:58:18                                                               //--
   ----------------------------------------------------------------------------------------------------
 
   SET NOCOUNT ON
@@ -287,7 +292,12 @@ BEGIN
   SET @Parameters += ', @BlockSize = ' + ISNULL(CAST(@BlockSize AS nvarchar),'NULL')
   SET @Parameters += ', @BufferCount = ' + ISNULL(CAST(@BufferCount AS nvarchar),'NULL')
   SET @Parameters += ', @MaxTransferSize = ' + ISNULL(CAST(@MaxTransferSize AS nvarchar),'NULL')
+
   SET @Parameters += ', @NumberOfFiles = ' + ISNULL(CAST(@NumberOfFiles AS nvarchar),'NULL')
+  SET @Parameters += ', @MinDatabaseSizeForMultipleFiles = ' + ISNULL(CAST(@MinDatabaseSizeForMultipleFiles AS nvarchar),'NULL')
+
+  SET @Parameters += ', @MaxFileSize = ' + ISNULL(CAST(@MaxFileSize AS nvarchar),'NULL')
+
   SET @Parameters += ', @CompressionLevel = ' + ISNULL(CAST(@CompressionLevel AS nvarchar),'NULL')
   SET @Parameters += ', @Description = ' + ISNULL('''' + REPLACE(@Description,'''','''''') + '''','NULL')
   SET @Parameters += ', @Threads = ' + ISNULL(CAST(@Threads AS nvarchar),'NULL')
@@ -987,25 +997,10 @@ BEGIN
 
   IF @Compress IS NULL
   BEGIN
-    SELECT @Compress = CASE
-    WHEN @BackupSoftware IS NULL AND EXISTS(SELECT * FROM sys.configurations WHERE name = 'backup compression default' AND value_in_use = 1) THEN 'Y'
-    WHEN @BackupSoftware IS NULL AND NOT EXISTS(SELECT * FROM sys.configurations WHERE name = 'backup compression default' AND value_in_use = 1) THEN 'N'
-    WHEN @BackupSoftware IS NOT NULL AND (@CompressionLevel IS NULL OR @CompressionLevel > 0)  THEN 'Y'
-    WHEN @BackupSoftware IS NOT NULL AND @CompressionLevel = 0  THEN 'N'
-    END
-  END
-
-  ----------------------------------------------------------------------------------------------------
-  --// Get number of files                                                                        //--
-  ----------------------------------------------------------------------------------------------------
-
-  IF @NumberOfFiles IS NULL
-  BEGIN
-    SELECT @NumberOfFiles = CASE
-    WHEN @BackupSoftware = 'DATA_DOMAIN_BOOST' THEN 1
-    WHEN @URL IS NOT NULL THEN (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)
-    ELSE (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)
-    END
+    SELECT @Compress = CASE WHEN @BackupSoftware IS NULL AND EXISTS(SELECT * FROM sys.configurations WHERE name = 'backup compression default' AND value_in_use = 1) THEN 'Y'
+                            WHEN @BackupSoftware IS NULL AND NOT EXISTS(SELECT * FROM sys.configurations WHERE name = 'backup compression default' AND value_in_use = 1) THEN 'N'
+                            WHEN @BackupSoftware IS NOT NULL AND (@CompressionLevel IS NULL OR @CompressionLevel > 0)  THEN 'Y'
+                            WHEN @BackupSoftware IS NOT NULL AND @CompressionLevel = 0  THEN 'N' END
   END
 
   ----------------------------------------------------------------------------------------------------
@@ -1156,10 +1151,34 @@ BEGIN
     SELECT 'The value for the parameter @MaxTransferSize is not supported.'
   END
 
-  IF @NumberOfFiles < 1 OR @NumberOfFiles > 64 OR (@NumberOfFiles > 32 AND @BackupSoftware = 'SQLBACKUP') OR @NumberOfFiles IS NULL OR @NumberOfFiles < (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @Directories WHERE Mirror = 0) > 0 OR (@URL IS NOT NULL AND @Credential IS NOT NULL AND @NumberOfFiles <> 1) OR (@NumberOfFiles > 1 AND @BackupSoftware IN('SQLBACKUP','SQLSAFE') AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 1)) OR (@NumberOfFiles > 32 AND @BackupSoftware = 'DATA_DOMAIN_BOOST') OR @NumberOfFiles < (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @URLs WHERE Mirror = 0) > 0
+  IF @NumberOfFiles < 1 OR @NumberOfFiles > 64 OR (@NumberOfFiles > 32 AND @BackupSoftware = 'SQLBACKUP') OR @NumberOfFiles < (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @Directories WHERE Mirror = 0) > 0 OR (@URL IS NOT NULL AND @Credential IS NOT NULL AND @NumberOfFiles <> 1)  OR (@NumberOfFiles > 1 AND @BackupSoftware IN('SQLBACKUP','SQLSAFE') AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 1)) OR (@NumberOfFiles > 32 AND @BackupSoftware = 'DATA_DOMAIN_BOOST') OR @NumberOfFiles < (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0) OR @NumberOfFiles % (SELECT NULLIF(COUNT(*),0) FROM @URLs WHERE Mirror = 0) > 0
   BEGIN
     INSERT INTO @Errors ([Message])
     SELECT 'The value for the parameter @NumberOfFiles is not supported.'
+  END
+
+  IF @MinDatabaseSizeForMultipleFiles <= 0
+  BEGIN
+    INSERT INTO @Errors ([Message])
+    SELECT 'The value for the parameter @MinDatabaseSizeForMultipleFiles is not supported.'
+  END
+
+  IF @MinDatabaseSizeForMultipleFiles IS NOT NULL AND @NumberOfFiles IS NULL
+  BEGIN
+    INSERT INTO @Errors ([Message])
+    SELECT 'The value for the parameter @MinDatabaseSizeForMultipleFiles is not supported. This parameter can only be used together with @NumberOfFiles.'
+  END
+
+  IF @MaxFileSize <= 0
+  BEGIN
+    INSERT INTO @Errors ([Message])
+    SELECT 'The value for the parameter @MaxFileSize is not supported.'
+  END
+
+  IF @MaxFileSize IS NOT NULL AND @NumberOfFiles IS NOT NULL
+  BEGIN
+    INSERT INTO @Errors ([Message])
+    SELECT 'The parameters @MaxFileSize and @NumberOfFiles cannot be used together.'
   END
 
   IF (@BackupSoftware IS NULL AND @CompressionLevel IS NOT NULL) OR (@BackupSoftware = 'LITESPEED' AND (@CompressionLevel < 0 OR @CompressionLevel > 8)) OR (@BackupSoftware = 'SQLBACKUP' AND (@CompressionLevel < 0 OR @CompressionLevel > 4)) OR (@BackupSoftware = 'SQLSAFE' AND (@CompressionLevel < 1 OR @CompressionLevel > 4)) OR (@CompressionLevel IS NOT NULL AND @BackupSoftware = 'DATA_DOMAIN_BOOST')
@@ -1863,7 +1882,18 @@ BEGIN
       END
     END
 
-    SET @CurrentNumberOfFiles = @NumberOfFiles
+    SELECT @CurrentNumberOfFiles = CASE WHEN @NumberOfFiles IS NULL AND @BackupSoftware = 'DATA_DOMAIN_BOOST' THEN 1
+                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NULL AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 0) THEN (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)
+                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NULL AND EXISTS(SELECT * FROM @URLs WHERE Mirror = 0) THEN (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)
+                                        WHEN @NumberOfFiles = 1 THEN @NumberOfFiles
+                                        WHEN @NumberOfFiles > 1 AND (@CurrentDatabaseSize >= (@MinDatabaseSizeForMultipleFiles * 1024 / 8) OR @MinDatabaseSizeForMultipleFiles IS NULL) THEN @NumberOfFiles
+                                        WHEN @NumberOfFiles > 1 AND (@CurrentDatabaseSize < (@MinDatabaseSizeForMultipleFiles * 1024 / 8)) AND EXISTS (SELECT * FROM @Directories WHERE Mirror = 0) THEN (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)
+                                        WHEN @NumberOfFiles > 1 AND (@CurrentDatabaseSize < (@MinDatabaseSizeForMultipleFiles * 1024 / 8)) AND EXISTS (SELECT * FROM @URLs WHERE Mirror = 0) THEN (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)
+                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NOT NULL AND EXISTS(SELECT * FROM @Directories WHERE Mirror = 0) THEN ((@CurrentDatabaseSize / (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)) / (@MaxFileSize * 1024 / 8) + CASE WHEN (@CurrentDatabaseSize / (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)) % (@MaxFileSize * 1024 / 8) = 0 THEN 0 ELSE 1 END) * (SELECT COUNT(*) FROM @Directories WHERE Mirror = 0)
+                                        WHEN @NumberOfFiles IS NULL AND @MaxFileSize IS NOT NULL AND EXISTS(SELECT * FROM @URLs WHERE Mirror = 0) THEN ((@CurrentDatabaseSize / (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)) / (@MaxFileSize * 1024 / 8) + CASE WHEN (@CurrentDatabaseSize / (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)) % (@MaxFileSize * 1024 / 8) = 0 THEN 0 ELSE 1 END) * (SELECT COUNT(*) FROM @URLs WHERE Mirror = 0)
+                                        END
+
+
 
     SELECT @CurrentDatabaseMirroringRole = UPPER(mirroring_role_desc)
     FROM sys.database_mirroring
